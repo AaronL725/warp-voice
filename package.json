@@ -1,6 +1,6 @@
 {
   "name": "warp-voice",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Magpie provider plugin for Warp Voice speech-to-text",
   "type": "module",
   "main": "./opencode.mjs",
@@ -11,7 +11,8 @@
     "index.mjs",
     "auth.mjs",
     "opencode.mjs",
-    "README.md"
+    "README.md",
+    "assets/warp-voice.png"
   ],
   "keywords": [
     "opencode",
@@ -22,5 +23,8 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/AaronL725/warp-voice.git"
+  },
+  "magpie": {
+    "icon": "https://raw.githubusercontent.com/AaronL725/warp-voice/main/assets/warp-voice.png"
   }
 }

@@ -4,17 +4,42 @@ import { authMethods, exchange, SERVER } from "./auth.mjs"
 const PROVIDER = "warp-voice"
 const BASE_URL = SERVER + "/v1"
 const TRANSCRIBE_URL = SERVER + "/ai/transcribe"
+const USAGE_OPERATION = "GetRequestLimitInfo"
+const USAGE_QUERY = `query GetRequestLimitInfo($requestContext: RequestContext!) {
+  user(requestContext: $requestContext) {
+    ... on UserOutput {
+      user {
+        requestLimitInfo {
+          isUnlimitedVoice
+          voiceRequestLimit
+          voiceRequestsUsedSinceLastRefresh
+          nextRefreshTime
+        }
+      }
+    }
+  }
+}`
 const MAX_WAV = 12 * 1024 * 1024
 const MAX_FORM = MAX_WAV + 1024 * 1024
 const MAX_RESPONSE = 8 * 1024 * 1024
 const RESPONSE_HEADERS = ["content-type", "retry-after", "x-warp-error-code"]
 const SDK = "@ai-sdk/openai-compatible"
+const OS_CATEGORY = { linux: "Linux", darwin: "macOS", win32: "Windows" }[process.platform] ?? process.platform
 
 function clientVersion(env = process.env) {
   const version = env.MAGPIE_WARP_CLIENT_VERSION || env.WARP_CLIENT_VERSION
   return typeof version === "string" && /^v?0\.\d{4}\.\d{2}\.\d{2}\.\d{2}\.\d{2}\.[\w.-]{1,64}$/.test(version)
     ? version : "v0.2026.11.18.08.17.stable_04"
 }
+
+const warpHeaders = (token) => ({
+  authorization: `Bearer ${token}`,
+  "content-type": "application/json",
+  accept: "application/json",
+  "accept-encoding": "identity",
+  "x-warp-client-version": clientVersion(),
+  "x-warp-os-category": OS_CATEGORY,
+})
 
 function createH2Post(idleMs = 10 * 60_000) {
   let current
@@ -72,7 +97,7 @@ function createH2Post(idleMs = 10 * 60_000) {
       signal?.addEventListener("abort", abort, { once: true })
       try {
         connection = acquire(target.origin)
-        req = connection.session.request({ ":method": "POST", ":path": target.pathname, ...headers })
+        req = connection.session.request({ ":method": "POST", ":path": target.pathname + target.search, ...headers })
         req.on("response", (value) => { response = value })
         req.on("error", failed)
         req.on("aborted", failed)
@@ -93,6 +118,44 @@ function createH2Post(idleMs = 10 * 60_000) {
 }
 
 const h2post = createH2Post()
+
+async function voiceUsage(getAuth, post, signal) {
+  const unknown = (error) => ({ error, windows: [] })
+  try {
+    const auth = await getAuth()
+    if (!auth?.access) return unknown("Sign in to Warp Voice in Magpie")
+    const headers = warpHeaders(auth.access)
+    const body = JSON.stringify({ operationName: USAGE_OPERATION, query: USAGE_QUERY, variables: {
+      requestContext: { clientContext: { version: headers["x-warp-client-version"] }, osContext: { category: OS_CATEGORY } },
+    } })
+    const deadline = AbortSignal.timeout(10_000)
+    const response = await post(`${SERVER}/graphql/v2?op=${USAGE_OPERATION}`, headers, body,
+      signal ? AbortSignal.any([signal, deadline]) : deadline)
+    const status = response.headers[":status"]
+    if (status !== 200) return unknown(`Warp Voice quota request returned HTTP ${status}`)
+    const info = JSON.parse(response.body.toString("utf8"))?.data?.user?.user?.requestLimitInfo
+    const name = "Voice requests"
+    if (info?.isUnlimitedVoice === true) return { windows: [{ name, display: "Unlimited" }] }
+
+    const limit = info?.voiceRequestLimit, reportedUsed = info?.voiceRequestsUsedSinceLastRefresh
+    if (info?.isUnlimitedVoice !== false || !Number.isSafeInteger(limit) || limit < 0 ||
+      !Number.isSafeInteger(reportedUsed) || reportedUsed < 0) {
+      return unknown("Warp did not return Voice quota information")
+    }
+    const reset = typeof info.nextRefreshTime === "string" ? Date.parse(info.nextRefreshTime) : NaN
+    // Warp's desktop client clears quota spent in the previous period once its reset has passed.
+    const now = Date.now()
+    const amount = reset <= now ? 0 : reportedUsed
+    const remaining = Math.max(0, limit - amount)
+    return { windows: [{
+      name, amount, limit, unit: "requests", used: limit > 0 ? amount / limit * 100 : 100,
+      display: `${remaining} / ${limit} requests left`,
+      ...(reset > now ? { resetsAt: new Date(reset).toISOString() } : {}),
+    }] }
+  } catch {
+    return unknown("Unable to read Warp Voice quota")
+  }
+}
 
 const errorResponse = (status, message) => Response.json({ error: { message } }, {
   status,
@@ -224,14 +287,7 @@ async function transcribe(input, init, getAuth, post) {
   if (signal.aborted) return interrupted()
   if (!auth?.access) return errorResponse(401, "Sign in to Warp Voice in Magpie")
   if (auth.expires && auth.expires <= Date.now()) return errorResponse(503, "Warp Voice could not refresh the sign-in")
-  const upstreamHeaders = {
-    authorization: `Bearer ${auth.access}`,
-    "content-type": "application/json",
-    accept: "application/json",
-    "accept-encoding": "identity",
-    "x-warp-client-version": clientVersion(),
-    "x-warp-os-category": { linux: "Linux", darwin: "macOS", win32: "Windows" }[process.platform] ?? process.platform,
-  }
+  const upstreamHeaders = warpHeaders(auth.access)
   const team = process.env.WARP_VOICE_TEAM_UID?.trim()
   if (team) upstreamHeaders["x-warp-team-uid"] = team
   const body = JSON.stringify({
@@ -262,6 +318,9 @@ function createPlugin(post = h2post) {
       methods: authMethods,
       async refresh(auth) {
         if (auth?.refresh) return exchange(auth.refresh)
+      },
+      async usage(getAuth, _provider, { signal } = {}) {
+        return voiceUsage(getAuth, post, signal)
       },
       async loader(getAuth) {
         return { baseURL: BASE_URL, apiKey: PROVIDER, fetch: (input, init) => transcribe(input, init, getAuth, post) }

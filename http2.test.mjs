@@ -30,10 +30,10 @@ test("HTTP/2 POST reads one complete response and preserves headers", async () =
     stream.write(headers[":method"] + " " + headers[":path"] + " ")
     stream.end(body)
   }, async (url) => {
-    const result = await _internal.createH2Post()(url, {}, "voice")
+    const result = await _internal.createH2Post()(url + "?op=Example", {}, "voice")
     expect(result.headers[":status"]).toBe(429)
     expect(result.headers["x-warp-error-code"]).toBe("OUT_OF_CREDITS")
-    expect(result.body.toString()).toBe("POST /ai/transcribe voice")
+    expect(result.body.toString()).toBe("POST /ai/transcribe?op=Example voice")
   })
 })
 

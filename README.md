@@ -24,10 +24,15 @@ If you already have a Warp refresh token, use `magpie plugin login warp-voice 2`
 and enter it at the prompt.
 
 The gateway must be able to reach `app.warp.dev` over HTTPS/HTTP/2. The plugin
-reuses that connection until it has been idle for 10 minutes. The login can use Google Firebase HTTPS endpoints and has a fallback through Warp's token
-proxy. If the account requires a team scope, set `WARP_VOICE_TEAM_UID` in the
+reuses that connection until it has been idle for 10 minutes. The login can
+use Google Firebase HTTPS endpoints with Warp's token proxy as a fallback.
+If the account requires a team scope, set `WARP_VOICE_TEAM_UID` in the
 gateway process environment. `MAGPIE_WARP_CLIENT_VERSION` or
 `WARP_CLIENT_VERSION` can override the default Warp client version.
+
+Magpie's Accounts & keys view and `magpie quota warp-voice` show the signed-in
+account's remaining Voice requests and next reset when Warp reports them. The
+plugin reads the Voice fields in Warp's `GetRequestLimitInfo` query.
 
 ## Call the API
 

@@ -5,11 +5,11 @@ import { WarpVoicePlugin } from "./opencode.mjs"
 const realFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = realFetch })
 const access = `e30.${Buffer.from(JSON.stringify({ sub: "account-vps" })).toString("base64url")}.sig`
-const device = { device_code: "secret", user_code: "ABCD", verification_uri: "https://app.warp.dev/activate", expires_in: 300, interval: 2 }
+const device = { device_code: "secret", user_code: "ABCD", verification_uri: "https://app.warp.dev/device", expires_in: 300, interval: 2 }
 
 test("device login polls at Warp's interval and exchanges the custom token for a Firebase session", async () => {
   const replies = [
-    [200, device],
+    [200, { ...device, verification_uri_complete: device.verification_uri + "?user_code=ABCD&source=cli" }],
     [400, { error: "authorization_pending" }],
     [400, { error: "slow_down" }],
     [200, { access_token: "custom" }],
@@ -22,8 +22,7 @@ test("device login polls at Warp's interval and exchanges the custom token for a
     return Response.json(body, { status })
   }
   const login = await deviceLogin(undefined, async (ms) => { delays.push(ms) })
-  expect(login.url).toBe(device.verification_uri)
-  expect(login.instructions).toContain(device.user_code)
+  expect(login.url).toBe(device.verification_uri + "?user_code=ABCD&source=cli")
   expect(login.instructions).not.toContain(device.device_code)
   expect(await login.callback()).toMatchObject({ type: "success", accountId: "account-vps", access, refresh: "refresh" })
   expect(delays).toEqual([2000, 2000, 7000])
@@ -40,6 +39,7 @@ test("expired device code stops polling", async () => {
   globalThis.fetch = async () => ++calls === 1 ? Response.json(device)
     : Response.json({ error: "expired_token" }, { status: 400 })
   const login = await deviceLogin(undefined, async () => {})
+  expect(login.url).toBe(device.verification_uri + "?user_code=ABCD")
   expect(await login.callback()).toMatchObject({ type: "failed", error: expect.stringContaining("expired") })
   expect(calls).toBe(2)
 })

@@ -16,8 +16,8 @@ magpie plugin add /absolute/path/to/warp-voice
 magpie plugin login warp-voice 1
 ```
 
-Open the verification URL printed by Magpie in a browser on any device and
-enter the displayed code. Magpie stores the resulting Warp sign-in and renews
+Open the full verification URL printed by Magpie in a browser on any device
+and approve the sign-in. The URL already contains the device code. Magpie stores the resulting Warp sign-in and renews
 it while the gateway is running. The VPS needs neither Warp App nor Warp CLI.
 If you already have a Warp refresh token, use `magpie plugin login warp-voice 2`
 and enter it at the prompt.

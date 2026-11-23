@@ -69,18 +69,20 @@ export async function deviceLogin(signal, wait = sleep) {
     signal ? AbortSignal.any([signal, timeout]) : timeout)
   const device = await response.json().catch(() => null)
   const ttl = device?.expires_in
-  const url = URL.canParse(device?.verification_uri) ? new URL(device.verification_uri) : null
+  const verificationUri = device?.verification_uri_complete ?? device?.verification_uri
+  const url = URL.canParse(verificationUri) ? new URL(verificationUri) : null
   if (!response.ok || url?.origin !== SERVER || url.username || url.password ||
       typeof device.device_code !== "string" || !device.device_code ||
       typeof device.user_code !== "string" || !device.user_code ||
       !Number.isSafeInteger(ttl) || ttl <= 0 || ttl > 86400) {
     throw new Error("Warp did not return a usable device sign-in")
   }
+  url.searchParams.set("user_code", device.user_code)
   const expires = Date.now() + ttl * 1000
   const interval = device.interval
   return {
     url: url.href,
-    instructions: `Open this address in a browser on any device and enter code ${device.user_code}.`,
+    instructions: "Open the full link in a browser on any device and approve the sign-in.",
     method: "auto",
     async callback(_code, { signal: callbackSignal } = {}) {
       let delay = Number.isSafeInteger(interval) && interval > 0 ? interval * 1000 : 5000

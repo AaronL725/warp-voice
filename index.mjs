@@ -16,45 +16,83 @@ function clientVersion(env = process.env) {
     ? version : "v0.2026.11.18.08.17.stable_04"
 }
 
-function h2post(url, headers, body, signal) {
-  return new Promise((resolve, reject) => {
-    const target = new URL(url)
-    const chunks = []
-    let bytes = 0, done = false, response, session
-    const finish = (error) => {
-      if (done) return
-      done = true
-      signal?.removeEventListener("abort", abort)
-      session?.destroy()
-      if (error) reject(error)
-      else resolve({ headers: response, body: Buffer.concat(chunks, bytes) })
+function createH2Post(idleMs = 10 * 60_000) {
+  let current
+
+  function retire(connection) {
+    if (current === connection) current = undefined
+    clearTimeout(connection.idle)
+    if (connection.active === 0 && !connection.session.destroyed) connection.session.destroy()
+  }
+
+  function acquire(origin) {
+    if (current && (current.origin !== origin || current.session.closed || current.session.destroyed)) {
+      retire(current)
     }
-    const failed = () => finish(new Error("Warp's HTTP/2 connection closed unexpectedly"))
-    const abort = () => finish(signal.reason)
-    if (signal?.aborted) return abort()
-    signal?.addEventListener("abort", abort, { once: true })
-    try {
-      session = http2.connect(target.origin)
-      session.on("error", failed)
-      session.on("close", failed)
-      const req = session.request({ ":method": "POST", ":path": target.pathname, ...headers })
-      req.on("response", (value) => { response = value })
-      req.on("error", failed)
-      req.on("aborted", failed)
-      req.on("close", failed)
-      req.on("data", (chunk) => {
-        if (done || chunk.length === 0) return
-        bytes += chunk.length
-        if (bytes > MAX_RESPONSE) return finish(new Error("Warp response exceeded its size limit"))
-        chunks.push(chunk)
-      })
-      req.on("end", () => response ? finish() : failed())
-      req.end(body)
-    } catch (error) {
-      finish(error)
+    if (!current) {
+      const session = http2.connect(origin)
+      const connection = { origin, session, active: 0, idle: undefined }
+      current = connection
+      session.on("goaway", () => retire(connection))
+      session.on("error", () => session.destroy())
+      session.once("close", () => retire(connection))
     }
-  })
+    clearTimeout(current.idle)
+    current.active++
+    return current
+  }
+
+  function release(connection) {
+    if (--connection.active !== 0) return
+    if (current !== connection || connection.session.closed || connection.session.destroyed) {
+      retire(connection)
+    } else {
+      connection.idle = setTimeout(() => retire(connection), idleMs)
+      connection.idle.unref()
+    }
+  }
+
+  return function h2post(url, headers, body, signal) {
+    return new Promise((resolve, reject) => {
+      const target = new URL(url)
+      const chunks = []
+      let bytes = 0, done = false, response, connection, req
+      const finish = (error) => {
+        if (done) return
+        done = true
+        signal?.removeEventListener("abort", abort)
+        if (error) req?.close(http2.constants.NGHTTP2_CANCEL)
+        if (connection) release(connection)
+        if (error) reject(error)
+        else resolve({ headers: response, body: Buffer.concat(chunks, bytes) })
+      }
+      const failed = () => finish(new Error("Warp's HTTP/2 connection closed unexpectedly"))
+      const abort = () => finish(signal.reason)
+      if (signal?.aborted) return abort()
+      signal?.addEventListener("abort", abort, { once: true })
+      try {
+        connection = acquire(target.origin)
+        req = connection.session.request({ ":method": "POST", ":path": target.pathname, ...headers })
+        req.on("response", (value) => { response = value })
+        req.on("error", failed)
+        req.on("aborted", failed)
+        req.on("close", failed)
+        req.on("data", (chunk) => {
+          if (done || chunk.length === 0) return
+          bytes += chunk.length
+          if (bytes > MAX_RESPONSE) return finish(new Error("Warp response exceeded its size limit"))
+          chunks.push(chunk)
+        })
+        req.on("end", () => response ? finish() : failed())
+        req.end(body)
+      } catch (error) {
+        finish(error)
+      }
+    })
+  }
 }
+
+const h2post = createH2Post()
 
 const errorResponse = (status, message) => Response.json({ error: { message } }, {
   status,
@@ -233,4 +271,4 @@ function createPlugin(post = h2post) {
 }
 
 export const WarpVoicePlugin = async () => createPlugin()
-export const _internal = { createPlugin, h2post, clientVersion, MAX_WAV, MAX_FORM, MAX_RESPONSE }
+export const _internal = { createPlugin, createH2Post, clientVersion, MAX_WAV, MAX_FORM, MAX_RESPONSE }

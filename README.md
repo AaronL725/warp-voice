@@ -17,13 +17,14 @@ magpie plugin login warp-voice 1
 ```
 
 Open the full verification URL printed by Magpie in a browser on any device
-and approve the sign-in. The URL already contains the device code. Magpie stores the resulting Warp sign-in and renews
-it while the gateway is running. The VPS needs neither Warp App nor Warp CLI.
+and approve the sign-in. The URL already contains the device code. Magpie
+stores and renews the sign-in while the gateway is running. The VPS needs
+neither Warp App nor Warp CLI.
 If you already have a Warp refresh token, use `magpie plugin login warp-voice 2`
 and enter it at the prompt.
 
-The gateway must be able to reach `app.warp.dev` over HTTPS/HTTP/2. The login
-can use Google Firebase HTTPS endpoints and has a fallback through Warp's token
+The gateway must be able to reach `app.warp.dev` over HTTPS/HTTP/2. The plugin
+reuses that connection until it has been idle for 10 minutes. The login can use Google Firebase HTTPS endpoints and has a fallback through Warp's token
 proxy. If the account requires a team scope, set `WARP_VOICE_TEAM_UID` in the
 gateway process environment. `MAGPIE_WARP_CLIENT_VERSION` or
 `WARP_CLIENT_VERSION` can override the default Warp client version.

@@ -1,6 +1,6 @@
 {
   "name": "warp-voice",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Magpie provider plugin for Warp Voice speech-to-text",
   "type": "module",
   "main": "./opencode.mjs",
